@@ -14,7 +14,8 @@ struct Quote {
 }
 
 struct ContentView: View {
-    @StateObject private var readwise = ReadwiseService(apiKey: "BOWw9f4lRQX01JMWttONcbAaSWnhpc5p5RyjAo550ns7LOJIb9")
+    // Ensure this apiKey is your valid Readwise API key
+    @StateObject private var readwise = ReadwiseService(apiKey: "BOWw9f4lRQX01JMWttONcbAaSWnhpc5p5RyjAo550ns7LOJIb9") 
     private let backgroundColors: [Color] = [
         Color(red: 0.1, green: 0.1, blue: 0.2),
         Color(red: 0.15, green: 0.1, blue: 0.15),
@@ -45,6 +46,9 @@ struct ContentView: View {
                             .foregroundColor(.white.opacity(0.8))
                             .italic()
                     }
+                } else {
+                    Text("Loading quote...")
+                        .foregroundColor(.white.opacity(0.7))
                 }
                 
                 Spacer()
@@ -52,12 +56,20 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(backgroundColors[currentColorIndex])
             .task {
-                try? await readwise.fetchRandomQuote()
+                do {
+                    try await readwise.fetchRandomQuote()
+                } catch {
+                    print("Error fetching quote on task: \(error)")
+                }
             }
             .onTapGesture {
                 currentColorIndex = (currentColorIndex + 1) % backgroundColors.count
                 Task {
-                    try? await readwise.fetchRandomQuote()
+                    do {
+                        try await readwise.fetchRandomQuote()
+                    } catch {
+                        print("Error fetching quote on tap: \(error)")
+                    }
                 }
             }
         }
