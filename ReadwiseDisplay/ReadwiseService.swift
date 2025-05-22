@@ -1,10 +1,18 @@
 import Foundation
 import SwiftUI
 
-struct ReadwiseQuote: Codable {
+// New struct to match the items within the "results" array
+struct APIHighlightItem: Codable {
     let text: String
-    let author: String
-    let source_title: String
+    let title: String? // Title of the source (book, article, etc.)
+    let author: String? // Author can sometimes be null
+    // We could add 'id' (highlight_id) or other fields if needed later
+}
+
+// New struct to match the overall API response structure
+struct APIHighlightListResponse: Codable {
+    // let count: Int // We don't strictly need count for this feature
+    let results: [APIHighlightItem]
 }
 
 class ReadwiseService: ObservableObject {
@@ -38,24 +46,56 @@ class ReadwiseService: ObservableObject {
             
             print("ReadwiseService: HTTP Status Code: \(httpResponse.statusCode)")
             
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("ReadwiseService: Received JSON string: \(jsonString)")
+            }
+            
             if !(200...299).contains(httpResponse.statusCode) {
                 let responseBody = String(data: data, encoding: .utf8) ?? "No parsable body"
                 print("ReadwiseService: HTTP Error \(httpResponse.statusCode). Body: \(responseBody)")
                 throw URLError(URLError.Code(rawValue: httpResponse.statusCode), userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode). Body: \(responseBody)"])
             }
             
-            let readwiseQuote = try JSONDecoder().decode(ReadwiseQuote.self, from: data)
+            // Decode into APIHighlightListResponse
+            let listResponse = try JSONDecoder().decode(APIHighlightListResponse.self, from: data)
             
-            DispatchQueue.main.async {
-                self.currentQuote = Quote(
-                    text: readwiseQuote.text,
-                    author: readwiseQuote.author,
-                    source: readwiseQuote.source_title
-                )
-                print("ReadwiseService: Quote updated successfully.")
+            // Get the first highlight from the results array
+            if let firstHighlight = listResponse.results.first {
+                DispatchQueue.main.async {
+                    self.currentQuote = Quote(
+                        text: firstHighlight.text,
+                        // Use the author and title directly from the highlight item
+                        author: firstHighlight.author ?? "Unknown Author",
+                        source: firstHighlight.title ?? "Unknown Source"
+                    )
+                    print("ReadwiseService: Highlight text updated successfully using first item from results.")
+                }
+            } else {
+                print("ReadwiseService: No highlights found in the results array.")
+                // Optionally, you could set currentQuote to nil or an error state here
+                DispatchQueue.main.async {
+                    self.currentQuote = Quote(text: "No highlights found in API response.", author: "", source: "")
+                }
             }
+            
         } catch {
-            print("ReadwiseService: Error during URLSession or JSON decoding: \(error)")
+            if let decodingError = error as? DecodingError {
+                print("ReadwiseService: DecodingError: \(decodingError)")
+                switch decodingError {
+                case .typeMismatch(let type, let context):
+                    print("  Type mismatch: \(type), Path: \(context.codingPath), Description: \(context.debugDescription)")
+                case .valueNotFound(let value, let context):
+                    print("  Value not found: \(value), Path: \(context.codingPath), Description: \(context.debugDescription)")
+                case .keyNotFound(let key, let context):
+                    print("  Key not found: \(key), Path: \(context.codingPath), Description: \(context.debugDescription)")
+                case .dataCorrupted(let context):
+                    print("  Data corrupted: Path: \(context.codingPath), Description: \(context.debugDescription)")
+                @unknown default:
+                    print("  Unknown decoding error.")
+                }
+            } else {
+                print("ReadwiseService: Error during URLSession or other processing: \(error)")
+            }
             throw error
         }
     }
