@@ -22,5 +22,9 @@ struct ReadwiseDisplayApp: App {
             ContentView()
                 .frame(minWidth: 400, minHeight: 300)
         }
+        Settings {
+            SettingsView()
+                .frame(minWidth: 300, idealWidth: 400, minHeight: 200, idealHeight: 250)
+        }
     }
 }

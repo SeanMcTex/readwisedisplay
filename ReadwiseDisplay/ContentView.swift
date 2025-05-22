@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct Quote {
+struct Quote: Equatable {
     let text: String
     let author: String
     let source: String
@@ -23,22 +23,22 @@ struct ContentView: View {
         Color(red: 0.12, green: 0.12, blue: 0.18)
     ]
     @State private var currentColorIndex = 0
-    
-    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
-    
+    @AppStorage("quoteRefreshInterval") private var quoteRefreshInterval: Double = 10.0
+    @State private var timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+
     var body: some View {
         GeometryReader { geometry in
-            let horizontalPaddingForQuote = geometry.size.width * 0.1 // For quote text
+            let horizontalPaddingForQuote = geometry.size.width * 0.1
 
             ZStack {
-                // Layer 1: Background Color
                 backgroundColors[currentColorIndex]
                     .edgesIgnoringSafeArea(.all)
+                    .animation(.easeInOut, value: currentColorIndex)
 
                 if let quote = readwise.currentQuote {
-                    // Layer 2: Quote Text - Vertically Centered
-                    VStack {
-                        Spacer() // Pushes text down
+                    // Layer 2: Quote Text Container
+                    VStack { // This VStack is used for vertical centering and padding
+                        Spacer()
                         Text(quote.text)
                             .font(.system(size: 90, weight: .light))
                             .minimumScaleFactor(0.2)
@@ -46,14 +46,20 @@ struct ContentView: View {
                             .multilineTextAlignment(.leading)
                             .padding(.horizontal, horizontalPaddingForQuote)
                             .foregroundColor(.white)
-                        Spacer() // Pushes text up
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity) // Allow spacers to work
-
-                    // Layer 3: Author and Source - Bottom Right
-                    VStack { // Outer VStack to push its content to the bottom
                         Spacer()
-                        HStack { // Inner HStack to push its content to the right
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.bottom, 170) // Reserved space for author/source
+                    .id("quoteView_\(quote.text)")
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+
+                    // Layer 3: Author and Source Container
+                    VStack { // For bottom-right pinning
+                        Spacer()
+                        HStack {
                             Spacer()
                             VStack(alignment: .trailing, spacing: 8) {
                                 Text("— \(quote.author)")
@@ -69,29 +75,34 @@ struct ContentView: View {
                                     .foregroundColor(.white.opacity(0.8))
                                     .italic()
                             }
-                            // Padding from the screen edges for author/source
-                            .padding(.trailing, 20) // Adjust as needed
-                            .padding(.bottom, 20)   // Adjust as needed
+                            .padding(.trailing, 20)
+                            .padding(.bottom, 20)
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity) // Allow spacers to work
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id("authorSourceView_\(quote.author)_\(quote.source)")
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .opacity
+                    ))
 
                 } else {
-                    // Loading State - Centered
+                    // Loading State
                     VStack {
                         Spacer()
                         Text("Loading quote...")
-                            .font(.system(size: 24)) // Give loading text a size
+                            .font(.system(size: 24))
                             .foregroundColor(.white.opacity(0.7))
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            // Apply gestures and tasks to the ZStack
+            .animation(.easeInOut(duration: 1.5), value: readwise.currentQuote)
             .task {
                 do {
                     try await readwise.fetchRandomQuote()
+                    self.timer = Timer.publish(every: quoteRefreshInterval, on: .main, in: .common).autoconnect()
                 } catch {
                     print("Error fetching quote on task: \(error)")
                 }
@@ -115,6 +126,13 @@ struct ContentView: View {
                         print("Error fetching quote on timer: \(error)")
                     }
                 }
+            }
+            .onChange(of: quoteRefreshInterval) { oldValue, newValue in
+                print("Timer interval changed to: \(newValue)")
+                // Cancel the old timer
+                self.timer.upstream.connect().cancel()
+                // Start a new timer with the new interval
+                self.timer = Timer.publish(every: newValue, on: .main, in: .common).autoconnect()
             }
         }
     }
