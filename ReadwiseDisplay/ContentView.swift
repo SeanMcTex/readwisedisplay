@@ -15,7 +15,7 @@ struct Quote {
 
 struct ContentView: View {
     // Ensure this apiKey is your valid Readwise API key
-    @StateObject private var readwise = ReadwiseService(apiKey: "BOWw9f4lRQX01JMWttONcbAaSWnhpc5p5RyjAo550ns7LOJIb9") 
+    @StateObject private var readwise = ReadwiseService(apiKey: "BOWw9f4lRQX01JMWttONcbAaSWnhpc5p5RyjAo550ns7LOJIb9")
     private let backgroundColors: [Color] = [
         Color(red: 0.1, green: 0.1, blue: 0.2),
         Color(red: 0.15, green: 0.1, blue: 0.15),
@@ -23,6 +23,8 @@ struct ContentView: View {
         Color(red: 0.12, green: 0.12, blue: 0.18)
     ]
     @State private var currentColorIndex = 0
+    
+    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     
     var body: some View {
         GeometryReader { geometry in
@@ -58,17 +60,28 @@ struct ContentView: View {
             .task {
                 do {
                     try await readwise.fetchRandomQuote()
+                    // No background change on initial load, only quote
                 } catch {
                     print("Error fetching quote on task: \(error)")
                 }
             }
             .onTapGesture {
-                currentColorIndex = (currentColorIndex + 1) % backgroundColors.count
                 Task {
                     do {
                         try await readwise.fetchRandomQuote()
+                        currentColorIndex = (currentColorIndex + 1) % backgroundColors.count
                     } catch {
                         print("Error fetching quote on tap: \(error)")
+                    }
+                }
+            }
+            .onReceive(timer) { _ in
+                Task {
+                    do {
+                        try await readwise.fetchRandomQuote()
+                        currentColorIndex = (currentColorIndex + 1) % backgroundColors.count
+                    } catch {
+                        print("Error fetching quote on timer: \(error)")
                     }
                 }
             }
