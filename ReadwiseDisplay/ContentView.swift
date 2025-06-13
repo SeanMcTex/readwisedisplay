@@ -19,6 +19,7 @@ struct ContentView: View {
     @StateObject private var readwise: ReadwiseService
     @State private var displayMessage: String?
     // @State private var isShowingSettings: Bool = false
+    @State private var isShowingSettings: Bool = false
 
     init() {
         let key = UserDefaults.standard.string(forKey: "readwiseAPIKey") ?? ""
@@ -40,21 +41,22 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let horizontalPaddingForQuote = geometry.size.width * 0.1
+            let isLandscape = geometry.size.width > geometry.size.height
 
             ZStack {
                 backgroundColors[currentColorIndex]
                     .edgesIgnoringSafeArea(.all)
                     .animation(.easeInOut, value: currentColorIndex)
 
-                /*
+                #if os(iOS)
                 VStack {
                     HStack {
                         Spacer()
                         Button {
-                            //isShowingSettings.toggle()
+                            isShowingSettings.toggle()
                         } label: {
                             Image(systemName: "gearshape.fill")
-                                .font(.system(size: 24, weight: .medium))
+                                .font(.system(size: isLandscape ? 20 : 24, weight: .medium))
                                 .foregroundColor(.white.opacity(0.7))
                                 .padding()
                         }
@@ -62,25 +64,79 @@ struct ContentView: View {
                     Spacer()
                 }
                 .padding(.top, geometry.safeAreaInsets.top)
-                */
+                #endif
 
                 if let message = displayMessage {
                     VStack {
                         Spacer()
                         Text(message)
-                            .font(.system(size: 24))
+                            .font(.system(size: isLandscape ? 20 : 24))
                             .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
                             .padding()
+                        #if os(iOS)
+                        Button("Open Settings") {
+                            isShowingSettings = true
+                        }
+                        .font(.system(size: 18))
+                        .foregroundColor(.blue)
+                        .padding(.top, 8)
+                        #endif
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let quote = readwise.currentQuote {
+                    // Dynamic font sizing based on device and orientation
+                    let quoteFontSize: CGFloat = {
+                        #if os(macOS)
+                        return 90
+                        #else
+                        if isLandscape {
+                            return geometry.size.width > 1000 ? 70 : 50  // iPad Pro vs regular iPad landscape
+                        } else {
+                            return geometry.size.width > 800 ? 60 : 45   // iPad Pro vs regular iPad portrait
+                        }
+                        #endif
+                    }()
+                    
+                    let authorFontSize: CGFloat = {
+                        #if os(macOS)
+                        return 48
+                        #else
+                        if isLandscape {
+                            return geometry.size.width > 1000 ? 36 : 28
+                        } else {
+                            return geometry.size.width > 800 ? 32 : 24
+                        }
+                        #endif
+                    }()
+                    
+                    let sourceFontSize: CGFloat = {
+                        #if os(macOS)
+                        return 38
+                        #else
+                        if isLandscape {
+                            return geometry.size.width > 1000 ? 30 : 24
+                        } else {
+                            return geometry.size.width > 800 ? 26 : 20
+                        }
+                        #endif
+                    }()
+                    
+                    // Dynamic padding for different orientations
+                    let bottomPadding: CGFloat = {
+                        #if os(macOS)
+                        return 170
+                        #else
+                        return isLandscape ? 120 : 180
+                        #endif
+                    }()
+
                     // Layer 2: Quote Text Container
                     VStack { // This VStack is used for vertical centering and padding
                         Spacer()
                         Text(quote.text)
-                            .font(.system(size: 90, weight: .light))
+                            .font(.system(size: quoteFontSize, weight: .light))
                             .minimumScaleFactor(0.2)
                             .lineLimit(nil)
                             .multilineTextAlignment(.leading)
@@ -89,7 +145,7 @@ struct ContentView: View {
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.bottom, 170) // Reserved space for author/source
+                    .padding(.bottom, bottomPadding) // Reserved space for author/source
                     .id("quoteView_\(quote.text)")
                     .transition(.asymmetric(
                         insertion: .move(edge: .top).combined(with: .opacity),
@@ -103,20 +159,20 @@ struct ContentView: View {
                             Spacer()
                             VStack(alignment: .trailing, spacing: 8) {
                                 Text("— \(quote.author)")
-                                    .font(.system(size: 48, weight: .medium))
+                                    .font(.system(size: authorFontSize, weight: .medium))
                                     .minimumScaleFactor(0.2)
                                     .lineLimit(nil)
                                     .foregroundColor(.white)
                                 
                                 Text(quote.source)
-                                    .font(.system(size: 38, weight: .regular))
+                                    .font(.system(size: sourceFontSize, weight: .regular))
                                     .minimumScaleFactor(0.2)
                                     .lineLimit(nil)
                                     .foregroundColor(.white.opacity(0.8))
                                     .italic()
                             }
                             .padding(.trailing, 20)
-                            .padding(.bottom, 20)
+                            .padding(.bottom, geometry.safeAreaInsets.bottom + 20)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -130,7 +186,7 @@ struct ContentView: View {
                     VStack {
                         Spacer()
                         Text("Loading quote...")
-                            .font(.system(size: 24))
+                            .font(.system(size: isLandscape ? 20 : 24))
                             .foregroundColor(.white.opacity(0.7))
                         Spacer()
                     }
@@ -139,9 +195,21 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 1.5), value: readwise.currentQuote)
             .animation(.easeInOut, value: displayMessage) // Animate message changes too
-            // .sheet(isPresented: $isShowingSettings) {
-            //     SettingsView()
-            // }
+            #if os(iOS)
+            .sheet(isPresented: $isShowingSettings) {
+                NavigationView {
+                    SettingsView()
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Done") {
+                                    isShowingSettings = false
+                                }
+                            }
+                        }
+                }
+            }
+            #endif
             .task {
                 await fetchQuoteAndUpdateState()
             }

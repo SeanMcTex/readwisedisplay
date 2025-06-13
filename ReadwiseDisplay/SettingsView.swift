@@ -25,6 +25,15 @@ struct SettingsView: View {
     }
     
     var body: some View {
+        #if os(macOS)
+        macOSSettingsView
+        #else
+        iOSSettingsView
+        #endif
+    }
+    
+    #if os(macOS)
+    private var macOSSettingsView: some View {
         VStack(spacing: 0) {
             // Header
             VStack(spacing: 4) {
@@ -162,6 +171,113 @@ struct SettingsView: View {
                minHeight: 320, idealHeight: 380, maxHeight: 450)
         .background(Color(NSColor.windowBackgroundColor))
     }
+    #endif
+    
+    #if os(iOS)
+    private var iOSSettingsView: some View {
+        Form {
+            Section {
+                VStack(spacing: 16) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 40, weight: .medium))
+                        .foregroundStyle(.blue)
+                    
+                    Text("Readwise Display Settings")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
+            .listRowBackground(Color.clear)
+            
+            Section("Display") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Refresh Interval")
+                            .font(.body)
+                        
+                        Spacer()
+                        
+                        HStack(spacing: 8) {
+                            TextField("", value: $quoteRefreshInterval, formatter: numberFormatter)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 60)
+                                .multilineTextAlignment(.center)
+                            
+                            Text("sec")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
+                    Stepper("", value: $quoteRefreshInterval, in: 5...300, step: 5)
+                        .labelsHidden()
+                    
+                    Text("Updates every \(formatInterval(quoteRefreshInterval))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            Section("API Configuration") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Readwise API Key")
+                                .font(.body)
+                            Text("Your personal API key from Readwise")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: { isAPIKeyVisible.toggle() }) {
+                            Image(systemName: isAPIKeyVisible ? "eye.slash.fill" : "eye.fill")
+                                .foregroundStyle(.blue)
+                                .font(.system(size: 16))
+                        }
+                    }
+                    
+                    Group {
+                        if isAPIKeyVisible {
+                            TextField("Enter your API key", text: $apiKey)
+                        } else {
+                            SecureField("Enter your API key", text: $apiKey)
+                        }
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    
+                    HStack {
+                        Image(systemName: apiKey.isEmpty ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(apiKey.isEmpty ? .orange : .green)
+                        
+                        Text(apiKey.isEmpty ? "API key required" : "API key configured")
+                            .font(.caption)
+                            .foregroundStyle(apiKey.isEmpty ? .orange : .green)
+                        
+                        Spacer()
+                        
+                        Button("Get API Key") {
+                            if let url = URL(string: "https://readwise.io/access_token") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+    #endif
     
     private func formatInterval(_ seconds: Double) -> String {
         let intSeconds = Int(seconds)
@@ -234,5 +350,11 @@ struct SettingRow<Content: View>: View {
 }
 
 #Preview {
+    #if os(macOS)
     SettingsView()
+    #else
+    NavigationView {
+        SettingsView()
+    }
+    #endif
 }
