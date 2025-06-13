@@ -22,10 +22,33 @@ struct APIHighlightListResponse: Codable {
     let results: [APIHighlightItem]
 }
 
+enum ReadwiseError: Error, LocalizedError {
+    case apiKeyMissing
+    case apiKeyInvalid
+    case networkError(Error)
+    case decodingError(Error)
+    case unknownError
+
+    var errorDescription: String? {
+        switch self {
+        case .apiKeyMissing:
+            return "Readwise API Key is missing."
+        case .apiKeyInvalid:
+            return "Readwise API Key is invalid or unauthorized."
+        case .networkError(let underlyingError):
+            return "Network error: \(underlyingError.localizedDescription)"
+        case .decodingError(let underlyingError):
+            return "Failed to decode server response: \(underlyingError.localizedDescription)"
+        case .unknownError:
+            return "An unknown error occurred."
+        }
+    }
+}
+
 class ReadwiseService: ObservableObject {
     @Published var currentQuote: Quote?
     
-    private let apiKey: String
+    private var apiKey: String
     private let baseURL = "https://readwise.io/api/v2"
     
     private var totalHighlightsCount: Int?
@@ -36,6 +59,11 @@ class ReadwiseService: ObservableObject {
     }
 
     private func fetchTotalHighlightsCountIfNeeded() async throws {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("ReadwiseService: API Key is missing.")
+            throw ReadwiseError.apiKeyMissing
+        }
+
         if totalHighlightsCount != nil {
             return // Count is already cached
         }
@@ -43,13 +71,13 @@ class ReadwiseService: ObservableObject {
         // Fetch page_size=1 just to get the total count
         guard var urlComponents = URLComponents(string: "\(baseURL)/highlights/") else {
             print("ReadwiseService: Invalid URL components for count.")
-            throw URLError(.badURL)
+            throw ReadwiseError.networkError(URLError(.badURL))
         }
         urlComponents.queryItems = [URLQueryItem(name: "page_size", value: "1")]
         
         guard let countURL = urlComponents.url else {
             print("ReadwiseService: Invalid URL for count.")
-            throw URLError(.badURL)
+            throw ReadwiseError.networkError(URLError(.badURL))
         }
         
         var request = URLRequest(url: countURL)
@@ -59,22 +87,44 @@ class ReadwiseService: ObservableObject {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseBody = String(data: data, encoding: .utf8) ?? "No parsable body"
-            print("ReadwiseService: HTTP Error \(statusCode) fetching count. Body: \(responseBody)")
-            throw URLError(URLError.Code(rawValue: statusCode), userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(statusCode) fetching count. Body: \(responseBody)"])
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("ReadwiseService: Response is not HTTPURLResponse for count.")
+            throw ReadwiseError.networkError(URLError(.badServerResponse))
+        }
+
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            print("ReadwiseService: API Key invalid (HTTP \(httpResponse.statusCode)) when fetching count.")
+            throw ReadwiseError.apiKeyInvalid
         }
         
-        let listResponse = try JSONDecoder().decode(APIHighlightListResponse.self, from: data)
-        self.totalHighlightsCount = listResponse.count
-        print("ReadwiseService: Total highlights count fetched and cached: \(self.totalHighlightsCount ?? -1)")
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = httpResponse.statusCode
+            let responseBody = String(data: data, encoding: .utf8) ?? "No parsable body"
+            print("ReadwiseService: HTTP Error \(statusCode) fetching count. Body: \(responseBody)")
+            throw ReadwiseError.networkError(URLError(URLError.Code(rawValue: statusCode), userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(statusCode) fetching count. Body: \(responseBody)"]))
+        }
+        
+        do {
+            let listResponse = try JSONDecoder().decode(APIHighlightListResponse.self, from: data)
+            self.totalHighlightsCount = listResponse.count
+            print("ReadwiseService: Total highlights count fetched and cached: \(self.totalHighlightsCount ?? -1)")
+        } catch {
+            print("ReadwiseService: DecodingError while fetching count: \(error)")
+            throw ReadwiseError.decodingError(error)
+        }
     }
 
     private func fetchBookDetails(for bookID: Int) async throws -> APIBookDetails? {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // This might not directly lead to a user-facing error if it's a sub-fetch,
+            // but the primary fetch would have already failed.
+            print("ReadwiseService: API Key is missing when attempting to fetch book details.")
+            return nil // Or throw ReadwiseError.apiKeyMissing if this should halt everything
+        }
+
         guard let url = URL(string: "\(baseURL)/books/\(bookID)/") else {
             print("ReadwiseService: Invalid URL for book details (ID: \(bookID)).")
-            throw URLError(.badURL)
+            throw ReadwiseError.networkError(URLError(.badURL))
         }
         var request = URLRequest(url: url)
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -82,16 +132,38 @@ class ReadwiseService: ObservableObject {
         print("ReadwiseService: Fetching book details for ID \(bookID) from \(url.absoluteString)")
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("ReadwiseService: Response is not HTTPURLResponse for book details (ID: \(bookID)).")
+            return nil // Don't throw, just return nil so the main flow can use fallbacks.
+        }
+
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            print("ReadwiseService: API Key invalid (HTTP \(httpResponse.statusCode)) when fetching book details for ID \(bookID).")
+            // Depending on strictness, you might throw ReadwiseError.apiKeyInvalid here too.
+            // For now, returning nil lets the main flow use fallbacks.
+            return nil
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
             print("ReadwiseService: HTTP Error \(statusCode) fetching book details for ID \(bookID).")
             // Optionally, you could inspect the body here for more detailed error messages from Readwise.
             return nil // Don't throw, just return nil so the main flow can use fallbacks.
         }
-        return try JSONDecoder().decode(APIBookDetails.self, from: data)
+        do {
+            return try JSONDecoder().decode(APIBookDetails.self, from: data)
+        } catch {
+            print("ReadwiseService: DecodingError for book details (ID: \(bookID)): \(error)")
+            return nil // Propagate as nil, don't throw a fatal ReadwiseError here
+        }
     }
     
     func fetchRandomQuote() async throws {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("ReadwiseService: fetchRandomQuote called with empty API Key.")
+            throw ReadwiseError.apiKeyMissing
+        }
+
         try await fetchTotalHighlightsCountIfNeeded()
         
         guard let count = totalHighlightsCount, count > 0 else {
@@ -106,7 +178,7 @@ class ReadwiseService: ObservableObject {
         let randomPageNumber = Int.random(in: 1...max(1, totalPages))
         
         guard var urlComponents = URLComponents(string: "\(baseURL)/highlights/") else {
-            throw URLError(.badURL)
+            throw ReadwiseError.networkError(URLError(.badURL))
         }
         urlComponents.queryItems = [
             URLQueryItem(name: "page", value: "\(randomPageNumber)"),
@@ -114,7 +186,7 @@ class ReadwiseService: ObservableObject {
         ]
         
         guard let pageURL = urlComponents.url else {
-            throw URLError(.badURL)
+            throw ReadwiseError.networkError(URLError(.badURL))
         }
         
         var request = URLRequest(url: pageURL)
@@ -126,16 +198,21 @@ class ReadwiseService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             // ... (HTTP response and status code checking remains the same) ...
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("ReadwiseService: Response is not HTTPURLResponse")
-                throw URLError(.badServerResponse)
+                print("ReadwiseService: Response is not HTTPURLResponse for page fetch.")
+                throw ReadwiseError.networkError(URLError(.badServerResponse))
             }
             
             print("ReadwiseService: HTTP Status Code for page fetch: \(httpResponse.statusCode)")
             
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                print("ReadwiseService: API Key invalid (HTTP \(httpResponse.statusCode)) when fetching page.")
+                throw ReadwiseError.apiKeyInvalid
+            }
+            
             if !(200...299).contains(httpResponse.statusCode) {
                 let responseBody = String(data: data, encoding: .utf8) ?? "No parsable body"
                 print("ReadwiseService: HTTP Error \(httpResponse.statusCode) fetching page. Body: \(responseBody)")
-                throw URLError(URLError.Code(rawValue: httpResponse.statusCode), userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode) fetching page. Body: \(responseBody)"])
+                throw ReadwiseError.networkError(URLError(URLError.Code(rawValue: httpResponse.statusCode), userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode) fetching page. Body: \(responseBody)"]))
             }
 
             let listResponse = try JSONDecoder().decode(APIHighlightListResponse.self, from: data)
@@ -175,26 +252,39 @@ class ReadwiseService: ObservableObject {
                     self.currentQuote = Quote(text: "Could not fetch a random highlight.", author: "", source: "")
                 }
             }
-        } catch {
-            // ... (existing error handling for fetchRandomQuote) ...
-            if let decodingError = error as? DecodingError {
-                print("ReadwiseService: DecodingError: \(decodingError)")
-                switch decodingError {
-                case .typeMismatch(let type, let context):
-                    print("  Type mismatch: \(type), Path: \(context.codingPath), Description: \(context.debugDescription)")
-                case .valueNotFound(let value, let context):
-                    print("  Value not found: \(value), Path: \(context.codingPath), Description: \(context.debugDescription)")
-                case .keyNotFound(let key, let context):
-                    print("  Key not found: \(key), Path: \(context.codingPath), Description: \(context.debugDescription)")
-                case .dataCorrupted(let context):
-                    print("  Data corrupted: Path: \(context.codingPath), Description: \(context.debugDescription)")
-                @unknown default:
-                    print("  Unknown decoding error.")
-                }
-            } else {
-                print("ReadwiseService: Error during URLSession or other processing: \(error)")
-            }
+        } catch let error as ReadwiseError {
+            // Re-throw ReadwiseErrors directly
             throw error
+        } catch let decodingError as DecodingError {
+            print("ReadwiseService: Top-level DecodingError in fetchRandomQuote: \(decodingError)")
+            switch decodingError {
+            case .typeMismatch(let type, let context):
+                print("  Type mismatch: \(type), Path: \(context.codingPath), Description: \(context.debugDescription)")
+            case .valueNotFound(let value, let context):
+                print("  Value not found: \(value), Path: \(context.codingPath), Description: \(context.debugDescription)")
+            case .keyNotFound(let key, let context):
+                print("  Key not found: \(key), Path: \(context.codingPath), Description: \(context.debugDescription)")
+            case .dataCorrupted(let context):
+                print("  Data corrupted: Path: \(context.codingPath), Description: \(context.debugDescription)")
+            @unknown default:
+                print("  Unknown decoding error.")
+            }
+            throw ReadwiseError.decodingError(decodingError)
+        } catch {
+            print("ReadwiseService: Generic error in fetchRandomQuote: \(error)")
+            throw ReadwiseError.networkError(error) // Wrap other errors
+        }
+    }
+
+    func updateApiKey(_ newKey: String) {
+        let trimmedKey = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedKey != apiKey else { return }
+        apiKey = trimmedKey
+        totalHighlightsCount = nil // Reset cache
+        Task { @MainActor in
+            self.currentQuote = nil
+            // If the new key is empty, we don't need to trigger a fetch.
+            // ContentView will handle displaying the "enter API key" message.
         }
     }
 }
