@@ -13,36 +13,84 @@ struct Quote: Equatable {
     let source: String
 }
 
+// MARK: - Constants
+private struct UserMessages {
+    static let enterAPIKey = "Please enter your Readwise API key in Settings."
+    static let invalidAPIKey = "API Key is invalid or unauthorized. Please check it in Settings."
+    static let unexpectedError = "An unexpected error occurred while fetching your quote."
+    static let loading = "Loading quote..."
+    static let openSettings = "Open Settings"
+}
+
+private struct FontSizing {
+    // Base font sizes for macOS (largest screen)
+    static let macOSQuoteSize: CGFloat = 90
+    static let macOSAuthorSize: CGFloat = 48
+    static let macOSSourceSize: CGFloat = 38
+    
+    // Dynamic sizing ratios relative to screen width
+    static let quoteRatio: CGFloat = 0.08  // 8% of screen width
+    static let authorRatio: CGFloat = 0.04 // 4% of screen width
+    static let sourceRatio: CGFloat = 0.032 // 3.2% of screen width
+    static let messageRatio: CGFloat = 0.024 // 2.4% of screen width
+    static let settingsButtonRatio: CGFloat = 0.024 // 2.4% of screen width
+    
+    // Minimum and maximum constraints
+    static let minQuoteSize: CGFloat = 24
+    static let maxQuoteSize: CGFloat = 120
+    static let minAuthorSize: CGFloat = 16
+    static let maxAuthorSize: CGFloat = 60
+    static let minSourceSize: CGFloat = 14
+    static let maxSourceSize: CGFloat = 48
+    static let minMessageSize: CGFloat = 16
+    static let maxMessageSize: CGFloat = 32
+    static let minButtonSize: CGFloat = 16
+    static let maxButtonSize: CGFloat = 28
+}
+
+private struct Layout {
+    static let horizontalPaddingRatio: CGFloat = 0.1 // 10% of screen width
+    static let settingsButtonPadding: CGFloat = 16
+    static let authorSourceSpacing: CGFloat = 8
+    static let authorSourceTrailingPadding: CGFloat = 20
+    static let authorSourceBottomPadding: CGFloat = 20
+    static let messageButtonSpacing: CGFloat = 8
+    
+    // Bottom padding ratios for quote text
+    static let macOSBottomPaddingRatio: CGFloat = 0.2 // 20% of screen height
+    static let landscapeBottomPaddingRatio: CGFloat = 0.15 // 15% of screen height
+    static let portraitBottomPaddingRatio: CGFloat = 0.18 // 18% of screen height
+}
+
 struct ContentView: View {
-    // Ensure this apiKey is your valid Readwise API key
     @AppStorage("readwiseAPIKey") private var apiKey: String = ""
     @StateObject private var readwise: ReadwiseService
     @State private var displayMessage: String?
-    // @State private var isShowingSettings: Bool = false
     @State private var isShowingSettings: Bool = false
 
     init() {
         let key = UserDefaults.standard.string(forKey: "readwiseAPIKey") ?? ""
         _readwise = StateObject(wrappedValue: ReadwiseService(apiKey: key))
         if key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            _displayMessage = State(initialValue: "Please enter your ReadWise API key in Settings.")
+            _displayMessage = State(initialValue: UserMessages.enterAPIKey)
         }
     }
+    
     private let backgroundColors: [Color] = [
         Color(red: 0.1, green: 0.1, blue: 0.2),
         Color(red: 0.15, green: 0.1, blue: 0.15),
         Color(red: 0.1, green: 0.15, blue: 0.2),
         Color(red: 0.12, green: 0.12, blue: 0.18)
     ]
+    
     @State private var currentColorIndex = 0
     @AppStorage("quoteRefreshInterval") private var quoteRefreshInterval: Double = 10.0
     @State private var timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geometry in
-            let horizontalPaddingForQuote = geometry.size.width * 0.1
-            let isLandscape = geometry.size.width > geometry.size.height
-
+            let sizing = DynamicSizing(geometry: geometry)
+            
             ZStack {
                 backgroundColors[currentColorIndex]
                     .edgesIgnoringSafeArea(.all)
@@ -56,9 +104,9 @@ struct ContentView: View {
                             isShowingSettings.toggle()
                         } label: {
                             Image(systemName: "gearshape.fill")
-                                .font(.system(size: isLandscape ? 20 : 24, weight: .medium))
+                                .font(.system(size: sizing.settingsButtonSize, weight: .medium))
                                 .foregroundColor(.white.opacity(0.7))
-                                .padding()
+                                .padding(Layout.settingsButtonPadding)
                         }
                     }
                     Spacer()
@@ -70,109 +118,63 @@ struct ContentView: View {
                     VStack {
                         Spacer()
                         Text(message)
-                            .font(.system(size: isLandscape ? 20 : 24))
+                            .font(.system(size: sizing.messageSize))
                             .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
                             .padding()
                         #if os(iOS)
-                        Button("Open Settings") {
+                        Button(UserMessages.openSettings) {
                             isShowingSettings = true
                         }
-                        .font(.system(size: 18))
+                        .font(.system(size: sizing.messageSize * 0.8))
                         .foregroundColor(.blue)
-                        .padding(.top, 8)
+                        .padding(.top, Layout.messageButtonSpacing)
                         #endif
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let quote = readwise.currentQuote {
-                    // Dynamic font sizing based on device and orientation
-                    let quoteFontSize: CGFloat = {
-                        #if os(macOS)
-                        return 90
-                        #else
-                        if isLandscape {
-                            return geometry.size.width > 1000 ? 70 : 50  // iPad Pro vs regular iPad landscape
-                        } else {
-                            return geometry.size.width > 800 ? 60 : 45   // iPad Pro vs regular iPad portrait
-                        }
-                        #endif
-                    }()
-                    
-                    let authorFontSize: CGFloat = {
-                        #if os(macOS)
-                        return 48
-                        #else
-                        if isLandscape {
-                            return geometry.size.width > 1000 ? 36 : 28
-                        } else {
-                            return geometry.size.width > 800 ? 32 : 24
-                        }
-                        #endif
-                    }()
-                    
-                    let sourceFontSize: CGFloat = {
-                        #if os(macOS)
-                        return 38
-                        #else
-                        if isLandscape {
-                            return geometry.size.width > 1000 ? 30 : 24
-                        } else {
-                            return geometry.size.width > 800 ? 26 : 20
-                        }
-                        #endif
-                    }()
-                    
-                    // Dynamic padding for different orientations
-                    let bottomPadding: CGFloat = {
-                        #if os(macOS)
-                        return 170
-                        #else
-                        return isLandscape ? 120 : 180
-                        #endif
-                    }()
-
-                    // Layer 2: Quote Text Container
-                    VStack { // This VStack is used for vertical centering and padding
+                    // Quote Text Container
+                    VStack {
                         Spacer()
                         Text(quote.text)
-                            .font(.system(size: quoteFontSize, weight: .light))
+                            .font(.system(size: sizing.quoteSize, weight: .light))
                             .minimumScaleFactor(0.2)
                             .lineLimit(nil)
                             .multilineTextAlignment(.leading)
-                            .padding(.horizontal, horizontalPaddingForQuote)
+                            .padding(.horizontal, sizing.horizontalPadding)
                             .foregroundColor(.white)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.bottom, bottomPadding) // Reserved space for author/source
+                    .padding(.bottom, sizing.bottomPadding)
                     .id("quoteView_\(quote.text)")
                     .transition(.asymmetric(
                         insertion: .move(edge: .top).combined(with: .opacity),
                         removal: .opacity
                     ))
 
-                    // Layer 3: Author and Source Container
-                    VStack { // For bottom-right pinning
+                    // Author and Source Container
+                    VStack {
                         Spacer()
                         HStack {
                             Spacer()
-                            VStack(alignment: .trailing, spacing: 8) {
+                            VStack(alignment: .trailing, spacing: Layout.authorSourceSpacing) {
                                 Text("— \(quote.author)")
-                                    .font(.system(size: authorFontSize, weight: .medium))
+                                    .font(.system(size: sizing.authorSize, weight: .medium))
                                     .minimumScaleFactor(0.2)
                                     .lineLimit(nil)
                                     .foregroundColor(.white)
                                 
                                 Text(quote.source)
-                                    .font(.system(size: sourceFontSize, weight: .regular))
+                                    .font(.system(size: sizing.sourceSize, weight: .regular))
                                     .minimumScaleFactor(0.2)
                                     .lineLimit(nil)
                                     .foregroundColor(.white.opacity(0.8))
                                     .italic()
                             }
-                            .padding(.trailing, 20)
-                            .padding(.bottom, geometry.safeAreaInsets.bottom + 20)
+                            .padding(.trailing, Layout.authorSourceTrailingPadding)
+                            .padding(.bottom, geometry.safeAreaInsets.bottom + Layout.authorSourceBottomPadding)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -182,11 +184,11 @@ struct ContentView: View {
                         removal: .opacity
                     ))
 
-                } else { // No specific message, no quote, API key likely present -> Loading state
+                } else {
                     VStack {
                         Spacer()
-                        Text("Loading quote...")
-                            .font(.system(size: isLandscape ? 20 : 24))
+                        Text(UserMessages.loading)
+                            .font(.system(size: sizing.messageSize))
                             .foregroundColor(.white.opacity(0.7))
                         Spacer()
                     }
@@ -194,7 +196,7 @@ struct ContentView: View {
                 }
             }
             .animation(.easeInOut(duration: 1.5), value: readwise.currentQuote)
-            .animation(.easeInOut, value: displayMessage) // Animate message changes too
+            .animation(.easeInOut, value: displayMessage)
             #if os(iOS)
             .sheet(isPresented: $isShowingSettings) {
                 NavigationView {
@@ -225,14 +227,13 @@ struct ContentView: View {
             }
             .onChange(of: apiKey) { _, newKey in
                 let trimmedKey = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                readwise.updateApiKey(trimmedKey) // Update service's key
+                readwise.updateApiKey(trimmedKey)
                 if trimmedKey.isEmpty {
-                    displayMessage = "Please enter your ReadWise API key in Settings."
-                    readwise.currentQuote = nil // Clear any existing quote
-                    timer.upstream.connect().cancel() // Stop timer if no key
+                    displayMessage = UserMessages.enterAPIKey
+                    readwise.currentQuote = nil
+                    timer.upstream.connect().cancel()
                 } else {
-                    displayMessage = nil // Clear message if key is now present
-                    // Restart timer and fetch
+                    displayMessage = nil
                     self.timer.upstream.connect().cancel()
                     self.timer = Timer.publish(every: quoteRefreshInterval, on: .main, in: .common).autoconnect()
                     Task {
@@ -240,11 +241,8 @@ struct ContentView: View {
                     }
                 }
             }
-            .onChange(of: quoteRefreshInterval) { oldValue, newValue in
-                print("Timer interval changed to: \(newValue)")
-                // Cancel the old timer
+            .onChange(of: quoteRefreshInterval) { _, newValue in
                 self.timer.upstream.connect().cancel()
-                // Start a new timer with the new interval
                 self.timer = Timer.publish(every: newValue, on: .main, in: .common).autoconnect()
             }
         }
@@ -253,39 +251,103 @@ struct ContentView: View {
     private func fetchQuoteAndUpdateState() async {
         let trimmedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedApiKey.isEmpty {
-            displayMessage = "Please enter your ReadWise API key in Settings."
+            displayMessage = UserMessages.enterAPIKey
             readwise.currentQuote = nil
             return
         }
 
-        // Clear previous message before attempting to fetch, but only if API key is present
         if displayMessage != nil && !trimmedApiKey.isEmpty {
              displayMessage = nil
         }
 
         do {
             try await readwise.fetchRandomQuote()
-            // If fetch is successful, currentQuote will be updated by the service,
-            // and the UI will react. displayMessage should be nil.
-            if readwise.currentQuote != nil { // Ensure message is cleared on success
+            if readwise.currentQuote != nil {
                 displayMessage = nil
             }
             currentColorIndex = (currentColorIndex + 1) % backgroundColors.count
         } catch let rwError as ReadwiseError {
             switch rwError {
             case .apiKeyMissing:
-                displayMessage = "Please enter your ReadWise API key in Settings."
+                displayMessage = UserMessages.enterAPIKey
             case .apiKeyInvalid:
-                displayMessage = "API Key is invalid or unauthorized. Please check it in Settings."
+                displayMessage = UserMessages.invalidAPIKey
             default:
-                displayMessage = rwError.localizedDescription // More generic error from ReadwiseError
+                displayMessage = rwError.localizedDescription
             }
-            readwise.currentQuote = nil // Clear quote on error
+            readwise.currentQuote = nil
         } catch {
-            print("ContentView: Unhandled error fetching quote: \(error)")
-            displayMessage = "An unexpected error occurred while fetching your quote."
-            readwise.currentQuote = nil // Clear quote on error
+            displayMessage = UserMessages.unexpectedError
+            readwise.currentQuote = nil
         }
+    }
+}
+
+// MARK: - Dynamic Sizing Helper
+private struct DynamicSizing {
+    let geometry: GeometryProxy
+    
+    var isLandscape: Bool {
+        geometry.size.width > geometry.size.height
+    }
+    
+    var screenWidth: CGFloat {
+        geometry.size.width
+    }
+    
+    var screenHeight: CGFloat {
+        geometry.size.height
+    }
+    
+    // Calculate font sizes dynamically based on screen dimensions
+    var quoteSize: CGFloat {
+        #if os(macOS)
+        return FontSizing.macOSQuoteSize
+        #else
+        let dynamicSize = screenWidth * FontSizing.quoteRatio
+        return max(FontSizing.minQuoteSize, min(FontSizing.maxQuoteSize, dynamicSize))
+        #endif
+    }
+    
+    var authorSize: CGFloat {
+        #if os(macOS)
+        return FontSizing.macOSAuthorSize
+        #else
+        let dynamicSize = screenWidth * FontSizing.authorRatio
+        return max(FontSizing.minAuthorSize, min(FontSizing.maxAuthorSize, dynamicSize))
+        #endif
+    }
+    
+    var sourceSize: CGFloat {
+        #if os(macOS)
+        return FontSizing.macOSSourceSize
+        #else
+        let dynamicSize = screenWidth * FontSizing.sourceRatio
+        return max(FontSizing.minSourceSize, min(FontSizing.maxSourceSize, dynamicSize))
+        #endif
+    }
+    
+    var messageSize: CGFloat {
+        let dynamicSize = screenWidth * FontSizing.messageRatio
+        return max(FontSizing.minMessageSize, min(FontSizing.maxMessageSize, dynamicSize))
+    }
+    
+    var settingsButtonSize: CGFloat {
+        let dynamicSize = screenWidth * FontSizing.settingsButtonRatio
+        return max(FontSizing.minButtonSize, min(FontSizing.maxButtonSize, dynamicSize))
+    }
+    
+    var horizontalPadding: CGFloat {
+        screenWidth * Layout.horizontalPaddingRatio
+    }
+    
+    var bottomPadding: CGFloat {
+        #if os(macOS)
+        return screenHeight * Layout.macOSBottomPaddingRatio
+        #else
+        let ratio = isLandscape ? Layout.landscapeBottomPaddingRatio : Layout.portraitBottomPaddingRatio
+        return screenHeight * ratio
+        #endif
     }
 }
 
